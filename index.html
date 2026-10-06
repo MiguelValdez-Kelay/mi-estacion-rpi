@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estación Raspberry Pi en tiempo real</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌡️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root {
+  box-sizing: border-box;
+  --bg: #f3f5f4; --card: #ffffff; --ink: #1b2120; --muted: #5d6864; --line: #dbe1de;
+  --temp: #d9480f; --hum: #1c6dd0; --ok: #2b8a3e; --off: #868e96; --led: #e03131;
+  --btn: #1b2120; --btn-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121615; --card: #1b2120; --ink: #e8edeb; --muted: #9aa5a1; --line: #2e3734;
+    --temp: #ff8a4c; --hum: #5aa2ff; --ok: #51cf66; --off: #868e96; --led: #ff6b6b;
+    --btn: #e8edeb; --btn-ink: #121615;
+  }
+}
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 16px; line-height: 1.5;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0; line-height: 1.2; }
+.sub { color: var(--muted); margin: 4px 0 0; font-size: 15px; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
+.status.on .dot { background: var(--ok); }
+.grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 760px) { .grid { grid-template-columns: 1fr 1fr 1.2fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.label { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.value { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 44px; font-weight: 500; line-height: 1.1; margin: 0; }
+.value small { font-size: 20px; color: var(--muted); margin-left: 4px; }
+.temp .value { color: var(--temp); }
+.hum .value { color: var(--hum); }
+.meta { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.ledrow { display: flex; align-items: center; gap: 16px; }
+.bulb { flex: 0 0 auto; width: 54px; height: 54px; border-radius: 50%; border: 2px solid var(--line);
+  background: radial-gradient(circle at 35% 30%, #ffffff, #d7d2ca 70%); transition: background .2s, box-shadow .2s; }
+.bulb.on { background: radial-gradient(circle at 35% 30%, #ffe3e0, var(--led) 70%); box-shadow: 0 0 22px 4px color-mix(in srgb, var(--led) 55%, transparent); }
+button { font: inherit; font-weight: 600; font-size: 16px; width: 100%; padding: 12px 16px; margin-top: 14px;
+  border-radius: 10px; border: 0; background: var(--btn); color: var(--btn-ink); cursor: pointer; }
+button:hover { opacity: .9; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid var(--hum); outline-offset: 2px; }
+.ledtext p { margin: 0; }
+.ledtext .big { font-size: 20px; font-weight: 600; }
+.chart { margin-top: 16px; }
+.chart h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+.canvasbox { position: relative; height: 320px; }
+footer { margin-top: 18px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .bulb { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Estación Raspberry Pi en tiempo real</h1>
+      <p class="sub">Sensor AHT10 conectado al GPIO por I2C · LED en el GPIO17</p>
+    </div>
+    <span class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></span>
+  </header>
+
+  <div class="grid">
+    <section class="card temp" aria-live="polite">
+      <p class="label">Temperatura</p>
+      <p class="value"><span id="temp">--.-</span><small>°C</small></p>
+      <p class="meta" id="updated">Esperando datos de la Raspberry Pi…</p>
+    </section>
+
+    <section class="card hum" aria-live="polite">
+      <p class="label">Humedad relativa</p>
+      <p class="value"><span id="hum">--.-</span><small>%</small></p>
+      <p class="meta" id="count">Lecturas en la gráfica: 0</p>
+    </section>
+
+    <section class="card">
+      <p class="label">Actuador: LED</p>
+      <div class="ledrow">
+        <div class="bulb" id="bulb" aria-hidden="true"></div>
+        <div class="ledtext">
+          <p class="big" id="ledState">Apagado</p>
+          <p class="meta" id="ledConfirm" style="margin-top:2px">Esperando confirmación…</p>
+        </div>
+      </div>
+      <button type="button" id="ledBtn" disabled>Encender LED</button>
+    </section>
+  </div>
+
+  <section class="card chart">
+    <h2>Últimos 2 minutos</h2>
+    <div class="canvasbox"><canvas id="chart" aria-label="Gráfica de temperatura y humedad en tiempo real" role="img"></canvas></div>
+  </section>
+
+  <footer>Datos sincronizados con Firebase Realtime Database. La Raspberry Pi envía una lectura cada 2 segundos.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, query, limitToLast, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB5MoL-2aauuzQBUkQ_4zF_piL-uNC2ki4",
+  authDomain: "estacion-rpi.firebaseapp.com",
+  databaseURL: "https://estacion-rpi-default-rtdb.firebaseio.com",
+  projectId: "estacion-rpi",
+  storageBucket: "estacion-rpi.firebasestorage.app",
+  messagingSenderId: "155642344874",
+  appId: "1:155642344874:web:83c85202347026ed6b67d3"
+};
+
+const db = getDatabase(initializeApp(firebaseConfig));
+const $ = id => document.getElementById(id);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const hora = ts => new Date(ts).toLocaleTimeString("es-GT", { hour12: false });
+
+// ---------- Gráfica ----------
+const chart = new Chart($("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [
+    { label: "Temperatura (°C)", data: [], borderColor: css("--temp"), backgroundColor: css("--temp"), yAxisID: "y", tension: 0.3, pointRadius: 0, borderWidth: 2 },
+    { label: "Humedad (%)", data: [], borderColor: css("--hum"), backgroundColor: css("--hum"), yAxisID: "y1", tension: 0.3, pointRadius: 0, borderWidth: 2 }
+  ]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: css("--ink"), usePointStyle: true, pointStyle: "line" } } },
+    scales: {
+      x: { ticks: { color: css("--muted"), maxTicksLimit: 6 }, grid: { color: css("--line") } },
+      y: { position: "left", title: { display: true, text: "°C", color: css("--temp") }, ticks: { color: css("--temp") }, grid: { color: css("--line") } },
+      y1: { position: "right", title: { display: true, text: "%", color: css("--hum") }, ticks: { color: css("--hum") }, grid: { drawOnChartArea: false } }
+    }
+  }
+});
+
+// ---------- Datos en tiempo real ----------
+let offset = 0, ultimoTs = 0;
+onValue(ref(db, ".info/serverTimeOffset"), s => { offset = s.val() || 0; });
+
+onValue(query(ref(db, "estacion/historial"), limitToLast(60)), snap => {
+  const filas = [];
+  snap.forEach(h => { const v = h.val(); if (v && typeof v.ts === "number") filas.push(v); });
+  chart.data.labels = filas.map(v => hora(v.ts));
+  chart.data.datasets[0].data = filas.map(v => v.temp);
+  chart.data.datasets[1].data = filas.map(v => v.hum);
+  chart.update();
+  $("count").textContent = `Lecturas en la gráfica: ${filas.length}`;
+  const u = filas[filas.length - 1];
+  if (u) {
+    ultimoTs = u.ts;
+    $("temp").textContent = u.temp.toFixed(1);
+    $("hum").textContent = u.hum.toFixed(1);
+    $("updated").textContent = `Última lectura: ${hora(u.ts)}`;
+  }
+});
+
+function revisarConexion() {
+  const enLinea = ultimoTs && (Date.now() + offset - ultimoTs) < 10000;
+  $("status").classList.toggle("on", !!enLinea);
+  $("statusText").textContent = enLinea ? "Raspberry Pi en línea" : (ultimoTs ? "Sin datos recientes" : "Esperando datos…");
+}
+setInterval(revisarConexion, 1000);
+
+// ---------- Actuador ----------
+let ledPedido = false;
+onValue(ref(db, "estacion/led"), s => {
+  const v = s.val();
+  ledPedido = !!(v && v.estado);
+  $("ledBtn").disabled = false;
+  $("ledBtn").textContent = ledPedido ? "Apagar LED" : "Encender LED";
+});
+onValue(ref(db, "estacion/led_real"), s => {
+  const v = s.val();
+  const on = !!(v && v.estado);
+  $("bulb").classList.toggle("on", on);
+  $("ledState").textContent = on ? "Encendido" : "Apagado";
+  $("ledConfirm").textContent = v && typeof v.ts === "number"
+    ? `Confirmado por la Raspberry Pi a las ${hora(v.ts)}`
+    : "Esperando confirmación…";
+});
+$("ledBtn").addEventListener("click", async () => {
+  $("ledBtn").disabled = true;
+  try {
+    await set(ref(db, "estacion/led"), { estado: !ledPedido, ts: serverTimestamp() });
+  } catch (e) {
+    alert("No se pudo enviar la orden: " + e.message);
+  } finally {
+    $("ledBtn").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
